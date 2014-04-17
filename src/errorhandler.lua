@@ -1,7 +1,6 @@
 local flu = require 'flu'
 
-return function(fs)
-  local LOG = fs.LOG
+return function(fs, LOG)
   local cache = {}
   local meta = {
     __index = function(self, key)
@@ -12,7 +11,7 @@ return function(fs)
 
         cache[key] = function(...)
 
-          LOG.info(key.." "..select(1, ...))
+          LOG.info(key)
           local res = {pcall(v, ...)}
           local ok = res[1]
           if not ok then
