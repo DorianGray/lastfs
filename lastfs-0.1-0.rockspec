@@ -26,6 +26,9 @@ build = {
     ["lastfs.init"]                     = "src/init.lua",
     ["lastfs.fs"]                       = "src/fs.lua",
     ["lastfs.config"]                   = "src/config.lua",
+    ["lastfs.ctx"]                      = "src/ctx.lua",
+    ["lastfs.errorhandler"]             = "src/errorhandler.lua",
     ["lastfs.constants.access"]         = "src/constants/access.lua",
+    ["lastfs.fuse.interface"]           = "src/fuse/interface.lua",
  }
 }
