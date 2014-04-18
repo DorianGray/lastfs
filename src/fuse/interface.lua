@@ -2,7 +2,6 @@ local flu       = require 'flu'
 local bit       = require 'bit'
 local ACCESS    = require 'constants.access'
 local mkset     = require 'utilities.fuse'.mkset
-local splitpath = require 'utilities.fuse'.splitpath
 local keys      = require 'utilities.fuse'.keys
 local assert    = require 'utilities.fuse'.assert
 
@@ -102,8 +101,19 @@ return function(fs)
   end
 
   function I.create(path, mode, fi)
-    I.mknod(path, mode)
-    I.open(path, fi)
+    local user = flu.get_context()
+    local ctx = fs.get(path, user)
+    assert(not ctx.file, EEXIST)
+    assert(ctx.parent, ENOENT)
+    assert(ctx.parent.mode.dir, ENOTDIR)
+    local pctx = fs.get(ctx.ppath, user)
+    assert(fs.check(pctx, W_OK), EACCES)
+    fs.new(ctx, {
+      mode = mode or mkset{ 'reg', 'rusr', 'wusr', 'rgrp', 'wgrp', 'roth' },
+    })
+    assert(ctx.file, ENOENT)
+    fi.fh = #descriptors+1
+    descriptors[fi.fh] = ctx
   end
 
   function I.unlink(path)

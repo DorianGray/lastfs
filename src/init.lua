@@ -11,6 +11,7 @@ local fs = require 'fs'()
 local connection = require 'db.connection'(config.db)
 if not connection then error('Could not get database collection, aborting') end
 ]]
+
 local writer = require 'log.writer.file.roll'.new(config.log.dir, config.log.file, 5000)
 
 local LOG = require"log".new(writer)

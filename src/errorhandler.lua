@@ -10,25 +10,30 @@ return function(fs, LOG)
       if type(v) == 'function' then
 
         cache[key] = function(...)
-
-          LOG.info(key)
-          local res = {pcall(v, ...)}
+          local args = {...}
+          LOG.info(key.." - "..(type(args[1]) == "string" and args[1] or ""))
+          local res = {
+            xpcall(
+              function() return v(unpack(args)) end,
+              function(message)
+                if type(message) == "userdata" then return message end
+                if type(message) == "string" then
+                  LOG.error(debug.traceback(message, 2))
+                else
+                  LOG.error(debug.traceback("", 2))
+                end
+                return flu.errno.EFAULT
+              end
+            )
+          }
           local ok = res[1]
-          if not ok then
-            local err = res[2]
-            local errType = type(err)
-            if errType == "userdata" then
-              error(err)
-            end
-            if errType == "string" then
-              LOG.error(err)
-            else
-              LOG.error("An error occurred that could not be logged")
-            end
-            error(flu.errno.EFAULT)
+          local err = res[2]
+          if not ok and err then
+            error(err)
           end
-          table.remove(res, 1)
-          return unpack(res)
+          if #res > 1 then
+            return unpack(res, 2)
+          end
         end
         return cache[key]
       end

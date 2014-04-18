@@ -1,5 +1,3 @@
-local splitpath   = require 'utilities.fuse'.splitpath
-
 return function(file)
 
   local lazyctx = {
@@ -8,8 +6,10 @@ return function(file)
       return self.path
     end,
     tpath = function(self)
-      self.tpath = splitpath(self.path)
-      return self.tpath
+      local tpath = {}
+      self.path:gsub("([^/]+)", function(c) tpath[#tpath+1] = c end)
+      self.tpath = tpath
+      return tpath
     end,
     file = function(self)
       if file[self.path] then
@@ -20,9 +20,9 @@ return function(file)
       return self.file
     end,
     tppath = function(self)
-      if self.tpath and #self.tpath > 0 then
-        self.tppath = {unpack(self.tpath)}
-        table.remove(self.tppath)
+      local tpath = self.tpath
+      if tpath and #tpath > 0 then
+        self.tppath = {unpack(tpath, 1, #tpath - 1)}
       else
         return nil
       end
@@ -56,22 +56,22 @@ return function(file)
   }
 
   local function ctx(path, user)
-    local ctx = {}
-    ctx.user = user
+    local ret = {}
+    ret.user = user
     if type(path) == "string" then
-      ctx.path = path
+      ret.path = path
     elseif type(path) == "table" then
-      ctx.tpath = path
+      ret.tpath = path
     end
 
-    function ctx.invalidate()
-      ctx.parent  = nil
-      ctx.ppath   = nil
-      ctx.tppath  = nil
-      ctx.file    = nil
+    function ret.invalidate()
+      ret.parent  = nil
+      ret.ppath   = nil
+      ret.tppath  = nil
+      ret.file    = nil
     end
 
-    return setmetatable(ctx, ctxmeta)
+    return setmetatable(ret, ctxmeta)
   end
   return ctx
 end

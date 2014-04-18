@@ -15,15 +15,6 @@ local assert = function(...)
   end
 end
 
-
-local function splitpath(path)
-  local elements = {}
-  for element in path:gmatch("[^/]+") do
-    table.insert(elements, element)
-  end
-  return elements
-end
-
 local function keys(tbl)
   local ret = {}
   if tbl then
