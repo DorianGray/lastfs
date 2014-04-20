@@ -1,39 +1,43 @@
+local mkset       = require 'utilities.fuse'.mkset
+local bit         = require 'bit'
+
+local R_OK        = require 'constants.access'.R_OK
+local W_OK        = require 'constants.access'.W_OK
+local X_OK        = require 'constants.access'.X_OK
+
 return function(config, LOG)
-  local connection = require 'database.connection'(config.db)
-  if not connection then error('Could not get database collection, aborting') end
+  local db = require 'backend.mongo.connection'(config)
 
-  local filemeta = {
-    __index = function(self, key) end
-  }
+  local file = {}
+  local fs = {file = file}
 
-  local file = {
+  fs.get = require 'backend.mongo.ctx'(db)
 
-  }
-
-  local fs = {}
-  fs.get = require 'ctx'(file)
-
-  function fs.new(ctx, meta)
+  function fs.new(ctx, attr)
     if not ctx.file and (ctx.parent or ctx.path == "/") then
+      local meta = {}
       file[ctx.path] = meta
-      if not meta.access then meta.access = os.time() end
-      if not meta.modification then meta.modification = os.time() end
-      if meta.mode.dir then
-        meta.size = 4096
-        meta.nlink = 2
+      meta.attr = attr
+      meta.attr.access        = os.time()
+      meta.attr.modification  = os.time()
+      meta.attr.uid           = ctx.user.uid
+      meta.attr.gid           = ctx.user.gid
+
+      meta.xattr = {}
+      if meta.attr.mode.dir then
+        meta.attr.size = 4096
+        meta.attr.nlink = 2
       else
-        meta.size = 0
-        meta.nlink = 1
+        meta.attr.size = 0
+        meta.attr.nlink = 1
         meta.data = ""
       end
       meta.name = ctx.tpath[#ctx.tpath]
-      meta.uid = ctx.user.uid
-      meta.gid = ctx.user.gid
       meta.children = {}
       meta.parent = ctx.parent and ctx.parent
 
       if meta.parent then
-        meta.parent.children[ctx.file.name] = meta
+        meta.parent.children[ctx.file.name] = true
       end
       return ctx
     end
@@ -45,12 +49,12 @@ return function(config, LOG)
       local newf = newctx.file
       if not newf then
         local parent = newctx.parent
-        if parent and parent.mode.dir then
-          parent.nlink = parent.nlink+1
-          ctx.parent.nlink = ctx.parent.nlink - 1
+        if parent and parent.attr.mode.dir then
+          parent.attr.nlink = parent.attr.nlink+1
+          ctx.parent.attr.nlink = ctx.parent.attr.nlink - 1
           ctx.parent.children[f.name] = nil
           f.name = newctx.tpath[#newctx.tpath]
-          parent.children[f.name] = f
+          parent.children[f.name] = true
           f.parent = newctx.parent
           newctx.file = f
           file[newctx.path] = f
@@ -65,8 +69,8 @@ return function(config, LOG)
   function fs.remove(ctx)
     if ctx.parent and ctx.file then
       ctx.parent.children[ctx.file.name] = nil
-      if ctx.file.mode.dir then
-        ctx.parent.nlink = ctx.parent.nlink - 1
+      if ctx.file.attr.mode.dir then
+        ctx.parent.attr.nlink = ctx.parent.attr.nlink - 1
       end
       file[ctx.path] = nil
       ctx.invalidate()
@@ -87,29 +91,115 @@ return function(config, LOG)
     local W_REQ = bit.band(mask, W_OK) == W_OK
     local X_REQ = bit.band(mask, X_OK) == X_OK
 
-    if f.uid == uid then
-      if  (not R_REQ or f.mode.rusr) and
-          (not W_REQ or f.mode.wusr) and
-          (not X_REQ or f.mode.xusr) then
+    if f.attr.uid == uid then
+      if  (not R_REQ or f.attr.mode.rusr) and
+          (not W_REQ or f.attr.mode.wusr) and
+          (not X_REQ or f.attr.mode.xusr) then
         return true
       end
     end
 
-    if f.gid == gid then
-      if  (not R_REQ or f.mode.rgrp) and
-          (not W_REQ or f.mode.wgrp) and
-          (not X_REQ or f.mode.xgrp) then
+    if f.attr.gid == gid then
+      if  (not R_REQ or f.attr.mode.rgrp) and
+          (not W_REQ or f.attr.mode.wgrp) and
+          (not X_REQ or f.attr.mode.xgrp) then
         return true
       end
     end
 
-    if  (not R_REQ or f.mode.roth) and
-        (not W_REQ or f.mode.woth) and
-        (not X_REQ or f.mode.xoth) then
+    if  (not R_REQ or f.attr.mode.roth) and
+        (not W_REQ or f.attr.mode.woth) and
+        (not X_REQ or f.attr.mode.xoth) then
       return true
     end
 
     return false
   end
+
+  function fs.write(ctx, buf, offset)
+    offset = offset or 0
+    local file = ctx.file
+    local buflen = #buf
+    local filelen = #file.data
+    if offset < filelen then
+      if offset + buflen >= filelen then
+        file.attr.size = offset + buflen - 1
+        file.data = file.data:sub(1,offset)..buf
+      else
+        file.data = file.data:sub(1,offset)..buf..file.data:sub(offset+buflen)
+      end
+    else
+      file.attr.size = offset + buflen - 1
+      file.data = file.data..string.rep('\0', offset-filelen)..buf
+    end
+    return #buf
+  end
+
+  function fs.truncate(ctx, size)
+    size = size or 0
+    local file = ctx.file
+    local len = #file.data
+    if size == 0 then
+      file.data = ""
+    elseif size > len then
+      file.data = file.data..string.rep('\0', size - len)
+    elseif size > len then
+      file.data = file.data:sub(1, size)
+    end
+    file.size = size
+  end
+
+  function fs.read(ctx, size, offset)
+    offset = offset or 0
+    local filelen = ctx.file.attr.size
+    if offset < filelen then
+      if offset + size > filelen then
+        size = filelen - offset
+      end
+      return ctx.file.data:sub(offset + 1, offset + size)
+    end
+    return ''
+  end
+
+  function fs.touch(ctx, accessed, modified)
+    ctx.file.attr.access = accessed and accessed.sec or os.time()
+    ctx.file.attr.modification = modified and modified.sec or os.time()
+  end
+
+  function fs.setxattr(ctx, xattr)
+    for name, value in pairs(xattr) do
+      ctx.file.xattr[name] = value
+    end
+  end
+
+  function fs.setattr(ctx, attr)
+    for name, value in pairs(attr) do
+      if value ~= nil then
+        ctx.file.attr[name] = value
+      end
+    end
+  end
+
+  function fs.getxattr(ctx, xattr)
+    if xattr == nil then
+      return ctx.file.xattr
+    else
+      local ret = {}
+      for name, value in pairs(xattr) do
+        ret[name] = value
+      end
+      return ret
+    end
+  end
+
+  function fs.setmode(ctx, mode)
+    ctx.file.attr.mode = mode
+  end
+
+  local root = {
+    mode = mkset{ 'dir', 'rusr', 'wusr', 'xusr', 'rgrp', 'wgrp', 'xgrp', 'roth', 'xoth' }
+  }
+  fs.new(fs.get('/', {uid=0, gid=0}), root)
+
   return fs
 end

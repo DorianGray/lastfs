@@ -10,7 +10,7 @@ return function(config, LOG)
   local file = {}
   local fs = {file = file}
 
-  fs.get = require 'ctx'(file)
+  fs.get = require 'backend.memory.ctx'(file)
 
   function fs.new(ctx, attr)
     if not ctx.file and (ctx.parent or ctx.path == "/") then
