@@ -2,7 +2,6 @@ local flu       = require 'flu'
 local bit       = require 'bit'
 local ACCESS    = require 'constants.access'
 local mkset     = require 'utilities.fuse'.mkset
-local keys      = require 'utilities.fuse'.keys
 local assert    = require 'utilities.fuse'.assert
 
 local EEXIST    = flu.errno.EEXIST
@@ -17,14 +16,14 @@ local R_OK        = require 'constants.access'.R_OK
 local W_OK        = require 'constants.access'.W_OK
 local X_OK        = require 'constants.access'.X_OK
 
-return function(fs)
+return function(fs, LOG)
   local I = {}
   local descriptors = {}
 
   function I.getattr(path)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
-    return ctx.file
+    return ctx.file.attr
   end
 
   function I.mkdir(path, mode)
@@ -33,7 +32,7 @@ return function(fs)
     local pctx = fs.get(ctx.ppath, user)
     assert(not ctx.file, EEXIST)
     assert(ctx.parent, ENOENT)
-    assert(ctx.parent.mode.dir, ENOTDIR)
+    assert(ctx.parent.attr.mode.dir, ENOTDIR)
     assert(fs.check(pctx, W_OK), EACCES)
     if mode and not mode.dir then mode.dir = true end
     fs.new(ctx, {
@@ -44,7 +43,7 @@ return function(fs)
   function I.rmdir(path)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
-    assert(ctx.file.mode.dir, ENOTDIR)
+    assert(ctx.file.attr.mode.dir, ENOTDIR)
     assert(fs.check(ctx, W_OK), EACCES)
     fs.remove(ctx)
   end
@@ -52,7 +51,7 @@ return function(fs)
   function I.opendir(path, fi)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
-    assert(ctx.file.mode.dir, ENOTDIR)
+    assert(ctx.file.attr.mode.dir, ENOTDIR)
     assert(ctx.file.name or ctx.path == "/", EINVAL)
     fi.fh = #descriptors+1
     descriptors[fi.fh] = ctx
@@ -80,7 +79,7 @@ return function(fs)
     local oldctx, newctx = fs.get(oldpath, user), fs.get(newpath, user)
     assert(oldctx.file, ENOENT)
     assert(newctx.parent, ENOENT)
-    assert(newctx.parent.mode.dir, ENOTDIR)
+    assert(newctx.parent.attr.mode.dir, ENOTDIR)
     assert(fs.check(oldctx, W_OK), EACCES)
     local newpctx = fs.get(newctx.ppath, user)
     assert(fs.check(newpctx, W_OK), EACCES)
@@ -92,7 +91,7 @@ return function(fs)
     local ctx = fs.get(path, user)
     assert(not ctx.file, EEXIST)
     assert(ctx.parent, ENOENT)
-    assert(ctx.parent.mode.dir, ENOTDIR)
+    assert(ctx.parent.attr.mode.dir, ENOTDIR)
     local pctx = fs.get(ctx.ppath, user)
     assert(fs.check(pctx, W_OK), EACCES)
     fs.new(ctx, {
@@ -105,7 +104,7 @@ return function(fs)
     local ctx = fs.get(path, user)
     assert(not ctx.file, EEXIST)
     assert(ctx.parent, ENOENT)
-    assert(ctx.parent.mode.dir, ENOTDIR)
+    assert(ctx.parent.attr.mode.dir, ENOTDIR)
     local pctx = fs.get(ctx.ppath, user)
     assert(fs.check(pctx, W_OK), EACCES)
     fs.new(ctx, {
@@ -119,7 +118,7 @@ return function(fs)
   function I.unlink(path)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
-    assert(not ctx.file.mode.dir, EISDIR)
+    assert(not ctx.file.attr.mode.dir, EISDIR)
     assert(fs.check(ctx, W_OK), EACCES)
     fs.remove(ctx)
   end
@@ -128,7 +127,7 @@ return function(fs)
     local ctx = fs.get(path, flu.get_context())
     local file = ctx.file
     assert(file, ENOENT)
-    assert(not file.mode.dir, EISDIR)
+    assert(not file.attr.mode.dir, EISDIR)
     fi.fh = #descriptors+1
     descriptors[fi.fh] = ctx
   end
@@ -143,16 +142,8 @@ return function(fs)
     local ctx = descriptors[fi.fh]
     assert(ctx, EINVAL)
     assert(fs.check(ctx, R_OK), EACCES)
-    local file = ctx.file
-    if file.mode.dir then return '' end
-    local filelen = #file.data
-    if offset < filelen then
-      if offset + size > filelen then
-        size = filelen - offset
-      end
-      return file.data:sub(offset + 1, offset + size)
-    end
-    return ''
+    if ctx.file.attr.mode.dir then return '' end
+    return fs.read(ctx, size, offset)
   end
 
   function I.write(path, buf, offset, fi)
@@ -160,102 +151,70 @@ return function(fs)
     local ctx = descriptors[fi.fh]
     assert(ctx, EINVAL)
     assert(fs.check(ctx, W_OK), EACCES)
-    local file = ctx.file
-    if file.mode.dir then return 0 end
-    local buflen = #buf
-    local filelen = #file.data
-    if offset < filelen then
-      if offset + buflen >= filelen then
-        file.size = offset + buflen - 1
-        file.data = file.data:sub(1,offset)..buf
-      else
-        file.data = file.data:sub(1,offset)..buf..file.data:sub(offset+buflen)
-      end
-    else
-      file.size = offset + buflen - 1
-      file.data = file.data..string.rep('\0', offset-filelen)..buf
-    end
-    return #buf
-  end
+    if ctx.file.attr.mode.dir then return 0 end
+    return fs.write(ctx, buf, offset)
+ end
 
   function I.truncate(path, size)
     local ctx = fs.get(path, flu.get_context())
     local file = ctx.file
     assert(file, ENOENT)
-    assert(not file.mode.dir, EISDIR)
+    assert(not file.attr.mode.dir, EISDIR)
     assert(fs.check(ctx, W_OK), EACCES)
-    local filename = file.name
-    local len = #file.data
-    if size == 0 then
-      file.data = ""
-    elseif size > len then
-      file.data = file.data..string.rep('\0', size - len)
-    elseif size > len then
-      file.data = file.data:sub(1, size)
-    end
-    file.size = size
+    fs.truncate(ctx, size)
   end
 
   function I.utimens(path, accessed, modified)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(fs.check(ctx, W_OK), EACCES)
-    local st = ctx.file
-    st.access = accessed and accessed.sec or os.time()
-    st.modification = modified and modified.sec or os.time()
+    fs.touch(ctx, accessed, modified)
   end
 
   function I.getxattr(path, name)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
-    local attrs = ctx.file.xattrs or error(ENOATTR)
+    assert(next(ctx.file.xattr) ~= nil, ENOATTR)
     assert(fs.check(ctx, R_OK), EACCES)
-    return attrs[name] or error(ENOATTR)
+    return fs.getxattr(ctx, {[name] = true})[name] or error(ENOATTR)
   end
 
   function I.setxattr(path, name, value, flags)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(fs.check(ctx, W_OK), EACCES)
-    local attrs = ctx.file.xattrs
-    if not attrs then
-      attrs = {}
-      ctx.file.xattrs = attrs
-    end
-    attrs[name] = value
+    assert(not flags.create or ctx.file.xattr[name] == nil, EEXIST)
+    assert(not flags.replace or ctx.file.xattr[name] ~= nil, ENOATTR)
+    fs.setxattr(ctx, {[name] = value})
   end
 
   function I.removexattr(path, name)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
-    local attrs = ctx.file.xattrs or error(ENOATTR)
+    assert(next(ctx.file.xattr) ~= nil, ENOATTR)
     assert(fs.check(ctx, W_OK), EACCES)
-    attrs[name] = nil
-    if next(attrs)==nil then
-      ctx.file.xattrs = nil
-    end
+    fs.setxattr(ctx, {[name] = nil})
   end
 
   function I.listxattr(path)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(fs.check(ctx, R_OK), EACCES)
-    return keys(ctx.file.xattrs)
+    return keys(fs.getxattr(ctx))
   end
 
   function I.chown(path, uid, gid)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(fs.check(ctx, W_OK), EACCES)
-    ctx.file.uid = uid
-    ctx.file.gid = gid
+    fs.setattr(ctx, {uid = uid, gid = gid})
   end
 
   function I.chmod(path, mode)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(fs.check(ctx, W_OK), EACCES)
-    ctx.file.mode = mode
+    fs.setmode(ctx, mode)
   end
 
   function I.access(path, mask)

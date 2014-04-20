@@ -1,15 +1,16 @@
-local mkset       = require 'utilities.fuse'.mkset
-local bit         = require 'bit'
+return function(config, LOG)
+  local connection = require 'database.connection'(config.db)
+  if not connection then error('Could not get database collection, aborting') end
 
-local R_OK        = require 'constants.access'.R_OK
-local W_OK        = require 'constants.access'.W_OK
-local X_OK        = require 'constants.access'.X_OK
+  local filemeta = {
+    __index = function(self, key) end
+  }
 
-return function()
+  local file = {
 
-  local file = {}
-  local fs = {file = file}
+  }
 
+  local fs = {}
   fs.get = require 'ctx'(file)
 
   function fs.new(ctx, meta)
@@ -110,11 +111,5 @@ return function()
 
     return false
   end
-
-  local root = {
-    mode = mkset{ 'dir', 'rusr', 'wusr', 'xusr', 'rgrp', 'wgrp', 'xgrp', 'roth', 'xoth' }
-  }
-  fs.new(fs.get('/', {uid=0, gid=0}), root)
-
   return fs
 end
