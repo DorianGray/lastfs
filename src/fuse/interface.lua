@@ -3,6 +3,7 @@ local bit       = require 'bit'
 local ACCESS    = require 'constants.access'
 local mkset     = require 'utilities.fuse'.mkset
 local assert    = require 'utilities.fuse'.assert
+local keys      = require 'utilities.fuse'.keys
 
 local EEXIST    = flu.errno.EEXIST
 local EINVAL    = flu.errno.EINVAL
