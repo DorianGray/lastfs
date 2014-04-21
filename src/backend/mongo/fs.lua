@@ -191,11 +191,17 @@ return function(config, LOG)
   function fs.write(ctx, buf, offset)
     offset = offset or 0
     if ctx.file then
-      local res, err = ctx.rawfile:write(buf, offset)
+      local res, err = ctx.rawfile:write(buf, offset, false)
       if not res then error(err) end
       return #buf
     end
     return 0
+  end
+
+  function fs.fsync(ctx)
+    if ctx.rawfile then
+      ctx.rawfile:flush()
+    end
   end
 
   function fs.truncate(ctx, size)

@@ -190,6 +190,10 @@ return function(config, LOG)
     ctx.file.attr.mode = mode
   end
 
+  function fs.fsync(ctx)
+
+  end
+
   local root = {
     mode = mkset{ 'dir', 'rusr', 'wusr', 'xusr', 'rgrp', 'wgrp', 'xgrp', 'roth', 'xoth' }
   }

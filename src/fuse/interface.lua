@@ -134,6 +134,9 @@ return function(fs, LOG)
 
   function I.release(path, fi)
     assert(fi.fh~=0, EINVAL)
+    local ctx = descriptors[fi.fh]
+    assert(ctx, EINVAL)
+    fs.fsync(ctx)
     table.remove(descriptors, fi.fh)
   end
 
@@ -151,7 +154,14 @@ return function(fs, LOG)
     assert(ctx, EINVAL)
     if ctx.file.attr.mode.dir then return 0 end
     return fs.write(ctx, buf, offset)
- end
+  end
+
+  function I.fsync(path, datasync, fi)
+    assert(fi.fh~=0, EINVAL)
+    local ctx = descriptors[fi.fh]
+    assert(ctx, EINVAL)
+    fs.fsync(ctx)
+  end
 
   function I.truncate(path, size)
     local ctx = fs.get(path, flu.get_context())
