@@ -18,5 +18,5 @@ return function(config)
     end
   end
 
-  return db:get_col(config.collection)
+  return db
 end

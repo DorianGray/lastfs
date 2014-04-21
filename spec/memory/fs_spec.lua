@@ -1,4 +1,4 @@
-local fs = require 'fs'
+local fs = require 'backend.memory.fs'
 local mkset = require 'utilities.fuse'.mkset
 
 describe("FS should work", function()
@@ -41,7 +41,7 @@ describe("FS should work", function()
     ctx = afs.get('/test/foo.txt', {uid = 0, gid = 0})
     afs.new(ctx, {mode = mkset{ 'dir', 'rusr', 'wusr', 'xusr', 'rgrp', 'wgrp', 'xgrp', 'roth', 'xoth' }})
     local ctx = afs.get('/test/foo.txt', {uid=0,gid=0})
-    assert.are.same(ctx.parent.children['foo.txt'], ctx.file)
+    assert.are.same(ctx.parent.children['foo.txt'], ctx.path)
     afs.remove(ctx)
     local ctx = afs.get('/test', {uid = 0, gid = 0})
     assert.are.same(ctx.file.children, {})
