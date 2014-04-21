@@ -8,7 +8,7 @@ local X_OK        = require 'constants.access'.X_OK
 return function(config, LOG)
 
   local file = {}
-  local fs = {file = file}
+  local fs = {}
 
   fs.get = require 'backend.memory.ctx'(file)
 
@@ -33,10 +33,10 @@ return function(config, LOG)
       end
       meta.name = ctx.tpath[#ctx.tpath]
       meta.children = {}
-      meta.parent = ctx.parent and ctx.parent
 
-      if meta.parent then
-        meta.parent.children[ctx.file.name] = true
+      local parent = file[ctx.ppath]
+      if parent then
+        parent.children[ctx.file.name] = ctx.path
       end
       return ctx
     end
@@ -47,14 +47,14 @@ return function(config, LOG)
     if f then
       local newf = newctx.file
       if not newf then
-        local parent = newctx.parent
+        local parent = file[newctx.ppath]
         if parent and parent.attr.mode.dir then
           parent.attr.nlink = parent.attr.nlink+1
-          ctx.parent.attr.nlink = ctx.parent.attr.nlink - 1
-          ctx.parent.children[f.name] = nil
+          local oldparent = file[ctx.ppath]
+          oldparent.attr.nlink = ctx.parent.attr.nlink - 1
+          oldparent.children[f.name] = nil
           f.name = newctx.tpath[#newctx.tpath]
           parent.children[f.name] = true
-          f.parent = newctx.parent
           newctx.file = f
           file[newctx.path] = f
           file[ctx.path] = nil
@@ -158,11 +158,6 @@ return function(config, LOG)
       return ctx.file.data:sub(offset + 1, offset + size)
     end
     return ''
-  end
-
-  function fs.touch(ctx, accessed, modified)
-    ctx.file.attr.access = accessed and accessed.sec or os.time()
-    ctx.file.attr.modification = modified and modified.sec or os.time()
   end
 
   function fs.setxattr(ctx, xattr)

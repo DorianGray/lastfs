@@ -37,9 +37,7 @@ return function(file)
       return self.ppath
     end,
     parent = function(self)
-      if self.file and self.file.parent then
-        self.parent = self.file.parent
-      elseif file[self.ppath] then
+      if file[self.ppath] then
         self.parent = file[self.ppath]
       else
         return nil

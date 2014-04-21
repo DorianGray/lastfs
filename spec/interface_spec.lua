@@ -1,4 +1,4 @@
-local fs = require 'fs'
+local fs = require 'backend.memory.fs'
 local interface = require 'fuse.interface'
 
 describe("Fuse Interface should work", function()

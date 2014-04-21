@@ -11,7 +11,7 @@ return function(fs, LOG)
 
         cache[key] = function(...)
           local args = {...}
-          LOG.info(key.." - "..(type(args[1]) == "string" and args[1] or ""))
+          --LOG.info(key.." - "..(type(args[1]) == "string" and args[1] or ""))
           local res = {
             xpcall(
               function() return v(unpack(args)) end,

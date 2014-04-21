@@ -7,7 +7,7 @@ return {
       database = 'lastfs'
     },
   },
-  fs = 'memory',
+  fs = 'mongo',
   log = {
     dir = "/var/log",
     file = "lastfs.log"

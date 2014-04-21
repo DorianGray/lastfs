@@ -1,4 +1,4 @@
-return function(db)
+return function(data)
 
   local lazyctx = {
     path = function(self)
@@ -12,8 +12,19 @@ return function(db)
       return tpath
     end,
     file = function(self)
-      if file[self.path] then
-        self.file = file[self.path]
+      local file = data:find_one({_id=self.path})
+      if file then
+        self.rawfile = file
+        self.file = file.file_metadata
+        self.file.attr.size = file.file_size
+        if self.file.children then
+          local newchildren = {}
+          for key, value in pairs(self.file.children) do
+            local newkey = key:gsub('/', '.')
+            newchildren[newkey] = value
+          end
+          self.file.children = newchildren
+        end
       else
         return nil
       end
@@ -37,10 +48,19 @@ return function(db)
       return self.ppath
     end,
     parent = function(self)
-      if self.file and self.file.parent then
-        self.parent = self.file.parent
-      elseif file[self.ppath] then
-        self.parent = file[self.ppath]
+      local file = self.path ~= '/' and data:find_one({_id=self.ppath})
+      if file then
+        self.rawparent = file
+        self.parent = file.file_metadata
+        self.parent.attr.size = file.file_size
+        if self.parent.children then
+          local newchildren = {}
+          for key, value in pairs(self.parent.children) do
+            local newkey = key:gsub('/', '.')
+            newchildren[newkey] = value
+          end
+          self.parent.children = newchildren
+        end
       else
         return nil
       end
@@ -65,10 +85,12 @@ return function(db)
     end
 
     function ret.invalidate()
-      ret.parent  = nil
-      ret.ppath   = nil
-      ret.tppath  = nil
-      ret.file    = nil
+      ret.parent    = nil
+      ret.rawparent = nil
+      ret.ppath     = nil
+      ret.tppath    = nil
+      ret.file      = nil
+      ret.rawfile   = nil
     end
 
     return setmetatable(ret, ctxmeta)

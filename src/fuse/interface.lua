@@ -141,7 +141,6 @@ return function(fs, LOG)
     assert(fi.fh~=0, EINVAL)
     local ctx = descriptors[fi.fh]
     assert(ctx, EINVAL)
-    assert(fs.check(ctx, R_OK), EACCES)
     if ctx.file.attr.mode.dir then return '' end
     return fs.read(ctx, size, offset)
   end
@@ -150,7 +149,6 @@ return function(fs, LOG)
     assert(fi.fh~=0, EINVAL)
     local ctx = descriptors[fi.fh]
     assert(ctx, EINVAL)
-    assert(fs.check(ctx, W_OK), EACCES)
     if ctx.file.attr.mode.dir then return 0 end
     return fs.write(ctx, buf, offset)
  end
@@ -168,7 +166,10 @@ return function(fs, LOG)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(fs.check(ctx, W_OK), EACCES)
-    fs.touch(ctx, accessed, modified)
+    fs.setattr(ctx, {
+      access = accessed and accessed.sec or os.time(),
+      modification = modified and modified.sec or os.time(),
+    })
   end
 
   function I.getxattr(path, name)
