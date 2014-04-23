@@ -41,14 +41,7 @@ return function(config, LOG)
         filename = file.name,
         metadata = file
       }
-      local ok, err = data:insert(
-      {
-        read = function(self)
-          if self.done then return nil end
-          self.done = true
-          return ""
-        end
-      }, meta, true)
+      local ok, err = data:new(meta, false)
       if not ok then error(err) end
       local parent = ctx.parent
       if parent then
@@ -142,9 +135,9 @@ return function(config, LOG)
       ['$unset']={
         ['metadata.children.'..ctx.file.name:gsub('%.','/')] = ""
       }
-    }, 0, 1)
+    }, 0, 1, false)
     if not ok then error(err) end
-    local ok, err = data:remove({_id=ctx.path}, 0, 1)
+    local ok, err = data:remove({_id=ctx.path}, 0, 1, false)
     if not ok then error(err) end
     ctx.invalidate()
     return ctx
@@ -206,7 +199,8 @@ return function(config, LOG)
 
   function fs.truncate(ctx, size)
     size = size or 0
-    local file = data:find_one({_id=ctx.path})
+    local file = ctx.file and ctx.rawfile
+    file:flush()
     local lastChunk = math.ceil(size/file.chunk_size)-1
     local ok, err = ccol:delete({files_id=ctx.path, n = {['$gt']=lastChunk}})
     if not ok then error(err) end
@@ -283,7 +277,7 @@ return function(config, LOG)
     },
     {
       ['$set']={
-        ['metadata.mode'] = mode
+        ['metadata.attr.mode'] = mode
       }
     }, 0, 1)
     if not ok then error(err) end
