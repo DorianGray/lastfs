@@ -21,6 +21,17 @@ return function(fs, LOG)
   local I = {}
   local descriptors = {}
 
+  math.randomseed(os.time())
+
+  local function getfh()
+    while true do
+      local fh = math.random(0, 18446744073709551615)
+      if not descriptors[fh] then
+        return fh
+      end
+    end
+  end
+
   function I.getattr(path)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
@@ -53,8 +64,8 @@ return function(fs, LOG)
     local ctx = fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     assert(ctx.file.attr.mode.dir, ENOTDIR)
-    assert(ctx.file.name or ctx.path == "/", EINVAL)
-    fi.fh = #descriptors+1
+    assert(fs.check(ctx, R_OK + X_OK), EACCES)
+    fi.fh = getfh()
     descriptors[fi.fh] = ctx
   end
 
@@ -67,7 +78,6 @@ return function(fs, LOG)
     assert(fi.fh~=0, EINVAL)
     local ctx = descriptors[fi.fh]
     assert(ctx, EINVAL)
-    assert(fs.check(ctx, R_OK + X_OK), EACCES)
     filler(".")
     filler("..")
     for name in pairs(ctx.file.children) do
@@ -111,8 +121,7 @@ return function(fs, LOG)
     fs.new(ctx, {
       mode = mode or mkset{ 'reg', 'rusr', 'wusr', 'rgrp', 'wgrp', 'roth' },
     })
-    assert(ctx.file, ENOENT)
-    fi.fh = #descriptors+1
+    fi.fh = getfh()
     descriptors[fi.fh] = ctx
   end
 
@@ -129,7 +138,16 @@ return function(fs, LOG)
     local file = ctx.file
     assert(file, ENOENT)
     assert(not file.attr.mode.dir, EISDIR)
-    fi.fh = #descriptors+1
+    local req = 0
+    if fi.flags.rdonly then
+      req = R_OK
+    elseif fi.flags.wronly then
+      req = W_OK
+    elseif fi.flags.rdwr then
+      req = R_OK + W_OK
+    end
+    assert(fs.check(ctx, req), EACCES)
+    fi.fh = getfh()
     descriptors[fi.fh] = ctx
   end
 
@@ -140,6 +158,14 @@ return function(fs, LOG)
     fs.fsync(ctx)
     table.remove(descriptors, fi.fh)
   end
+
+  --this function is the devil. It's also very broken...the return value doesn't work the same here as other places:
+--[[  function I.fgetattr(path, st, fi)
+    assert(fi.fh~=0, EINVAL)
+    local ctx = descriptors[fi.fh]
+    return ctx.file.attr
+  end
+]]
 
   function I.read(path, size, offset, fi)
     assert(fi.fh~=0, EINVAL)
@@ -155,6 +181,15 @@ return function(fs, LOG)
     assert(ctx, EINVAL)
     if ctx.file.attr.mode.dir then return 0 end
     return fs.write(ctx, buf, offset)
+  end
+
+  function I.ftruncate(path, size, fi)
+    assert(fi.fh~=0, EINVAL)
+    local ctx = descriptors[fi.fh]
+    assert(ctx, EINVAL)
+    assert(ctx.flags.wronly or ctx.flags.rdwr, EACCES)
+    if ctx.file.attr.mode.dir then return 0 end
+    fs.truncate(ctx, size)
   end
 
   function I.fsync(path, datasync, fi)
@@ -231,8 +266,14 @@ return function(fs, LOG)
 
   function I.access(path, mask)
     local ctx = fs.get(path, flu.get_context())
-    if not ctx.file then error(ENOENT) end
-    return fs.check(ctx, mask) and 0 or error(EACCES)
+    assert(ctx.file, ENOENT)
+    assert(fs.check(ctx, mask), EACCES)
+    return 0
+  end
+
+  function I.statfs(path)
+    local ctx = fs.get(path, flu.get_context)
+    return fs.statfs(ctx)
   end
 
   return I

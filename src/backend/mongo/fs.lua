@@ -17,61 +17,61 @@ return function(config, LOG)
   fs.get = require 'backend.mongo.ctx'(data)
 
   function fs.new(ctx, attr)
-    if not ctx.file and (ctx.parent or ctx.path == "/") then
-      local file = {}
-      file.attr = attr
-      file.attr.access        = os.time()
-      file.attr.modification  = os.time()
-      file.attr.uid           = ctx.user.uid
-      file.attr.gid           = ctx.user.gid
+    local file = {}
+    file.attr = attr
+    file.attr.access        = os.time()
+    file.attr.modification  = os.time()
+    file.attr.uid           = ctx.user.uid
+    file.attr.gid           = ctx.user.gid
 
-      file.xattr = {}
-      if file.attr.mode.dir then
-        file.attr.nlink = 2
-        file.children = {}
-      else
-        file.attr.nlink = 1
-      end
-
-      file.attr.size = 0
-      file.name = ctx.tpath[#ctx.tpath]
-
-      local meta = {
-        _id = ctx.path,
-        filename = file.name,
-        metadata = file
-      }
-      local ok, err = data:new(meta, false)
-      if not ok then error(err) end
-      local parent = ctx.parent
-      if parent then
-        local query = {
-          ['$set']={
-            ['metadata.children.'..ctx.file.name:gsub('%.','/')]=ctx.path
-          }
-        }
-        if file.attr.mode.dir then
-          query["$inc"] = {
-            ['metadata.attr.nlink'] = 1
-          }
-        end
-        local ok, err = fscol:update({
-          _id=ctx.ppath
-        }, query, 0, 1)
-        if not ok then error(err) end
-      end
-      return ctx
+    file.xattr = {}
+    if file.attr.mode.dir then
+      file.attr.nlink = 2
+      file.children = {}
+    else
+      file.attr.nlink = 1
     end
+
+    file.attr.size = 0
+    file.name = ctx.tpath[#ctx.tpath]
+
+    local meta = {
+      _id = ctx.path,
+      filename = file.name,
+      metadata = file
+    }
+    local ok, err = data:new(meta, true)
+    if not ok then error(err) end
+    ctx.file = file
+    ctx.rawfile = ok
+    if ctx.path ~= '/' then
+      local query = {
+        ['$set']={
+          ['metadata.children.'..ctx.file.name:gsub('%.','/')]=ctx.path
+        }
+      }
+      if file.attr.mode.dir then
+        query["$inc"] = {
+          ['metadata.attr.nlink'] = 1
+        }
+      end
+      local ok, err = fscol:update({
+        _id=ctx.ppath
+      }, query, 0, 1)
+      if not ok then error(err) end
+    end
+    return ctx
   end
 
   function fs.move(ctx, newctx)
     --get original file
     if ctx.file then
+      fs.fsync(ctx)
       local f = ctx.rawfile
       local oldfilename = ctx.file.name
       local newfilename = newctx.tpath[#newctx.tpath]
 
-
+      ctx.file.name = newfilename
       --move file
       local newfile = {
         _id = newctx.path,
@@ -79,16 +79,17 @@ return function(config, LOG)
         length = f.file_size,
         md5 = f.file_md5,
         filename = newfilename,
-        metadata = f.file_metadata
+        metadata = ctx.file
       }
-      local ok, err = fscol:insert({newfile})
+      local ok, err = fscol:insert({newfile}, false)
       if not ok then error(err) end
+      newctx.file = ctx.file
 
       --move chunks
-      local ok, err = ccol:update({files_id=ctx.path}, {files_id=newctx.path}, 1, 1)
+      local ok, err = ccol:update({files_id=ctx.path}, {files_id=newctx.path}, 1, 1, false)
 
       --delete old file
-      local ok, err = fscol:delete({_id=ctx.path})
+      local ok, err = fscol:delete({_id=ctx.path}, false)
       if not ok then error(err) end
 
       --decrement old parent nlink and remove child
@@ -104,7 +105,7 @@ return function(config, LOG)
       end
       local ok, err = fscol:update({
         _id=ctx.ppath
-      }, query, 0, 1)
+      }, query, 0, 1, false)
 
       --increment new parent nlink and set child
       local query = {
@@ -119,23 +120,25 @@ return function(config, LOG)
       end
       local ok, err = fscol:update({
         _id=newctx.ppath
-      }, query, 0, 1)
+      }, query, 0, 1, false)
       ctx.invalidate()
     end
   end
 
   function fs.remove(ctx)
+    local query = {
+      ['$unset']={
+        ['metadata.children.'..ctx.file.name:gsub('%.','/')]=""
+      }
+    }
+    if ctx.file.attr.mode.dir then
+      query["$inc"] = {
+        ['metadata.attr.nlink'] = -1
+      }
+    end
     local ok, err = fscol:update({
       _id=ctx.ppath
-    },
-    {
-      ['$inc']={
-        ['metadata.attr.nlink'] = -1
-      },
-      ['$unset']={
-        ['metadata.children.'..ctx.file.name:gsub('%.','/')] = ""
-      }
-    }, 0, 1, false)
+    }, query, 0, 1, true)
     if not ok then error(err) end
     local ok, err = data:remove({_id=ctx.path}, 0, 1, false)
     if not ok then error(err) end
@@ -202,7 +205,7 @@ return function(config, LOG)
     local file = ctx.file and ctx.rawfile
     file:flush()
     local lastChunk = math.ceil(size/file.chunk_size)-1
-    local ok, err = ccol:delete({files_id=ctx.path, n = {['$gt']=lastChunk}})
+    local ok, err = ccol:delete({files_id=ctx.path, n = {['$gt']=lastChunk}}, false)
     if not ok then error(err) end
     local ok, err = fscol:update({
       _id=ctx.path
@@ -211,7 +214,7 @@ return function(config, LOG)
       ['$set']={
         length = size
       }
-    }, 0, 1)
+    }, 0, 1, false)
     if not ok then error(err) end
   end
 
@@ -237,7 +240,7 @@ return function(config, LOG)
     },
     {
       ['$set']=set
-    }, 0, 1)
+    }, 0, 1, false)
     if not ok then error(err) end
   end
 
@@ -254,7 +257,7 @@ return function(config, LOG)
     },
     {
       ['$set']=set
-    }, 0, 1)
+    }, 0, 1, false)
     if not ok then error(err) end
   end
 
@@ -279,14 +282,26 @@ return function(config, LOG)
       ['$set']={
         ['metadata.attr.mode'] = mode
       }
-    }, 0, 1)
+    }, 0, 1, false)
     if not ok then error(err) end
+  end
+
+  function fs.statfs(ctx)
+    local q = {["$regex"]="^"..ctx.path..'(/|$)'}
+    return {
+      bsize = 255*1024,
+      blocks = ccol:count({files_id=q}),
+      files = fscol:count({_id=q})
+    }
   end
 
   local root = {
     mode = mkset{ 'dir', 'rusr', 'wusr', 'xusr', 'rgrp', 'wgrp', 'xgrp', 'roth', 'xoth' }
   }
-  fs.new(fs.get('/', {uid=0, gid=0}), root)
+  local ctx = fs.get('/', {uid=0, gid=0})
+  if not ctx.file then
+    fs.new(ctx, root)
+  end
 
   return fs
 end
