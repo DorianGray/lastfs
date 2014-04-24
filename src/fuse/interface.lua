@@ -1,6 +1,4 @@
 local flu       = require 'flu'
-local bit       = require 'bit'
-local ACCESS    = require 'constants.access'
 local mkset     = require 'utilities.fuse'.mkset
 local assert    = require 'utilities.fuse'.assert
 local keys      = require 'utilities.fuse'.keys
@@ -17,23 +15,47 @@ local R_OK        = require 'constants.access'.R_OK
 local W_OK        = require 'constants.access'.W_OK
 local X_OK        = require 'constants.access'.X_OK
 
+math.randomseed(os.time())
+
 return function(fs, LOG)
+
   local I = {}
-  local descriptors = {}
+  local handle = {
+    byfh = {},
+    bypath = {},
+  }
 
-  math.randomseed(os.time())
+  function handle:get(key)
+    if type(key) == "string" then
+      return self.bypath[key]
+    else
+      return self.byfh[key]
+    end
+  end
 
-  local function getfh()
+  function handle:new(ctx)
+    local fh
     while true do
-      local fh = math.random(0, 18446744073709551615)
-      if not descriptors[fh] then
-        return fh
+      fh = math.random(0, 18446744073709551615)
+      if not handle[fh] then
+        break
       end
+    end
+    self.byfh[fh] = ctx
+    self.bypath[ctx.path] = ctx
+    return fh
+  end
+
+  function handle:remove(fh)
+    local ctx = self.byfh[fh]
+    if ctx then
+      self.byfh[fh] = nil
+      self.bypath[ctx.path] = nil
     end
   end
 
   function I.getattr(path)
-    local ctx = fs.get(path, flu.get_context())
+    local ctx = handle:get(path) or fs.get(path, flu.get_context())
     assert(ctx.file, ENOENT)
     return ctx.file.attr
   end
@@ -65,18 +87,17 @@ return function(fs, LOG)
     assert(ctx.file, ENOENT)
     assert(ctx.file.attr.mode.dir, ENOTDIR)
     assert(fs.check(ctx, R_OK + X_OK), EACCES)
-    fi.fh = getfh()
-    descriptors[fi.fh] = ctx
+    fi.fh = handle:new(ctx)
   end
 
   function I.releasedir(path, fi)
     assert(fi.fh~=0, EINVAL)
-    table.remove(descriptors, fi.fh)
+    handle:remove(fi.fh)
   end
 
   function I.readdir(path, filler, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
+    local ctx = handle:get(fi.fh)
     assert(ctx, EINVAL)
     filler(".")
     filler("..")
@@ -121,8 +142,7 @@ return function(fs, LOG)
     fs.new(ctx, {
       mode = mode or mkset{ 'reg', 'rusr', 'wusr', 'rgrp', 'wgrp', 'roth' },
     })
-    fi.fh = getfh()
-    descriptors[fi.fh] = ctx
+    fi.fh = handle:new(ctx)
   end
 
   function I.unlink(path)
@@ -147,29 +167,29 @@ return function(fs, LOG)
       req = R_OK + W_OK
     end
     assert(fs.check(ctx, req), EACCES)
-    fi.fh = getfh()
-    descriptors[fi.fh] = ctx
+    fi.fh = handle:new(ctx)
   end
 
   function I.release(path, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
+    local ctx = handle:get(fi.fh)
     assert(ctx, EINVAL)
     fs.fsync(ctx)
-    table.remove(descriptors, fi.fh)
+    handle:remove(fi.fh)
   end
 
-  --this function is the devil. It's also very broken...the return value doesn't work the same here as other places:
---[[  function I.fgetattr(path, st, fi)
+  function I.fgetattr(path, st, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
-    return ctx.file.attr
+    local ctx = handle:get(fi.fh)
+    assert(ctx, EINVAL)
+    for k, v in pairs(ctx.file.attr) do
+      st[k] = v
+    end
   end
-]]
 
   function I.read(path, size, offset, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
+    local ctx = handle:get(fi.fh)
     assert(ctx, EINVAL)
     if ctx.file.attr.mode.dir then return '' end
     return fs.read(ctx, size, offset)
@@ -177,7 +197,7 @@ return function(fs, LOG)
 
   function I.write(path, buf, offset, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
+    local ctx = handle:get(fi.fh)
     assert(ctx, EINVAL)
     if ctx.file.attr.mode.dir then return 0 end
     return fs.write(ctx, buf, offset)
@@ -185,7 +205,7 @@ return function(fs, LOG)
 
   function I.ftruncate(path, size, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
+    local ctx = handle:get(fi.fh)
     assert(ctx, EINVAL)
     assert(ctx.flags.wronly or ctx.flags.rdwr, EACCES)
     if ctx.file.attr.mode.dir then return 0 end
@@ -194,7 +214,7 @@ return function(fs, LOG)
 
   function I.fsync(path, datasync, fi)
     assert(fi.fh~=0, EINVAL)
-    local ctx = descriptors[fi.fh]
+    local ctx = handle:get(fi.fh)
     assert(ctx, EINVAL)
     fs.fsync(ctx)
   end
@@ -276,5 +296,6 @@ return function(fs, LOG)
     return fs.statfs(ctx)
   end
 
-  return I
+  local handle = require 'errorhandler'
+  return handle(I, LOG)
 end

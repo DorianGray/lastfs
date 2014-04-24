@@ -37,6 +37,7 @@ return function(config, LOG)
 
     local meta = {
       _id = ctx.path,
+      chunkSize = 64*1024,
       filename = file.name,
       metadata = file
     }
@@ -138,7 +139,7 @@ return function(config, LOG)
     end
     local ok, err = fscol:update({
       _id=ctx.ppath
-    }, query, 0, 1, true)
+    }, query, 0, 1, false)
     if not ok then error(err) end
     local ok, err = data:remove({_id=ctx.path}, 0, 1, false)
     if not ok then error(err) end
