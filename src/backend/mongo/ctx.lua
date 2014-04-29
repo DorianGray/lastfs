@@ -75,7 +75,7 @@ return function(data)
     end
   }
 
-  local function ctx(path, user)
+  local function new(path, user)
     local ret = {}
     ret.user = user
     if type(path) == "string" then
@@ -95,5 +95,27 @@ return function(data)
 
     return setmetatable(ret, ctxmeta)
   end
-  return ctx
+
+  local function children(ctx)
+    local r = data:find({
+      _id = {['$regex']='^'..ctx.path..'[^/]*$'}
+    })
+
+    if r then
+      local ret = {}
+      for _, v in pairs(r) do
+        local child = new(ctx.path, ctx.user)
+        child.file = v.file_metadata
+        child.rawfile = v
+        child.parent = ctx.file
+        ret[#ret+1] = child
+      end
+      return ret
+    end
+  end
+
+  return {
+    new = new,
+    children = children
+  }
 end

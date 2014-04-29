@@ -14,7 +14,9 @@ return function(config, LOG)
 
   local fs = {}
 
-  fs.get = require 'backend.mongo.ctx'(data)
+  local ctxlib = require 'backend.mongo.ctx'(data)
+  fs.get = ctxlib.new
+  fs.getchildren = ctxlib.children
 
   function fs.new(ctx, attr)
     local file = {}
@@ -82,7 +84,7 @@ return function(config, LOG)
         filename = newfilename,
         metadata = ctx.file
       }
-      local ok, err = fscol:insert({newfile}, false)
+      local ok, err = fscol:insert({newfile}, 1, false)
       if not ok then error(err) end
       newctx.file = ctx.file
 

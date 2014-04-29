@@ -21,6 +21,7 @@ return function(fs, LOG)
 
   local I = {}
   local handle = {
+    dir = {},
     byfh = {},
     bypath = {},
   }
@@ -34,12 +35,27 @@ return function(fs, LOG)
   end
 
   function handle:new(ctx)
+    local isdir = ctx.file.attr.mode.dir
     local fh
     while true do
       fh = math.random(0, 18446744073709551615)
-      if not handle[fh] then
+      if (isdir and not self.dir[fh]) or (not self.byfh[fh]) then
         break
       end
+    end
+    if isdir then
+      local dir = {
+        ctx = ctx,
+        files = fs.getchildren(ctx)
+      }
+      for k, v in pairs(dir.files) do
+        if not self.bypath[v.path] then
+          self.bypath[v.path] = v
+        else
+          dir.files[k] = nil
+        end
+      end
+      self.dir[fh] = dir
     end
     self.byfh[fh] = ctx
     self.bypath[ctx.path] = ctx
@@ -47,12 +63,19 @@ return function(fs, LOG)
   end
 
   function handle:remove(fh)
+    local dir = self.dir[fh]
+    if dir then
+      for _, v in pairs(dir.files) do
+        self.bypath[v.path] = nil
+      end
+      self.dir[fh] = nil
+    end
     local ctx = self.byfh[fh]
     if ctx then
       self.byfh[fh] = nil
       self.bypath[ctx.path] = nil
     end
-  end
+ end
 
   function I.getattr(path)
     local ctx = handle:get(path) or fs.get(path, flu.get_context())
