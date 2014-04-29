@@ -11,7 +11,7 @@ return function(fs, LOG)
 
         cache[key] = function(...)
           local args = {...}
-          LOG.info(key.." - "..(type(args[1]) == "string" and args[1] or ""))
+          if LOG then LOG.info(key.." - "..(type(args[1]) == "string" and args[1] or "")) end
           local res = {
             xpcall(
               function() return v(unpack(args)) end,
@@ -21,16 +21,16 @@ return function(fs, LOG)
                   for k, v in pairs(flu.errno) do
                     if v == message then
                       found = true
-                      LOG.info(key..' returned '..k)
+                      if LOG then LOG.info(key..' returned '..k) end
                       break
                     end
                   end
                   return message
                 end
                 if type(message) == "string" then
-                  LOG.error(debug.traceback(message, 2))
+                  if LOG then LOG.error(debug.traceback(message, 2)) end
                 else
-                  LOG.error(debug.traceback("", 2))
+                  if LOG then LOG.error(debug.traceback("", 2)) end
                 end
                 return flu.errno.EFAULT
               end
@@ -42,10 +42,10 @@ return function(fs, LOG)
             error(err)
           end
           if #res > 1 then
-            LOG.info(require 'cjson'.encode(unpack(res, 2)))
+            if LOG then LOG.info(require 'cjson'.encode(unpack(res, 2))) end
             return unpack(res, 2)
           end
-          LOG.info("null")
+          if LOG then LOG.info("null") end
         end
         return cache[key]
       end
