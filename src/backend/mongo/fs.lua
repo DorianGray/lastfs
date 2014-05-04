@@ -43,7 +43,7 @@ return function(config, LOG)
       filename = file.name,
       metadata = file
     }
-    local ok, err = data:new(meta, true)
+    local ok, err = data:new(meta, false)
     if not ok then error(err) end
     ctx.file = file
     ctx.rawfile = ok
@@ -290,12 +290,33 @@ return function(config, LOG)
   end
 
   function fs.statfs(ctx)
-    local q = {["$regex"]="^"..ctx.path..'(/|$)'}
-    return {
-      bsize = 255*1024,
-      blocks = ccol:count({files_id=q}),
-      files = fscol:count({_id=q})
+    local path = ctx.path == "/" and "" or ctx.path
+    local q = {["_id"] = {["$regex"]="^"..path..'(/|$)'}}
+    local pipeline = {
+      {
+        ["$match"] = q
+      },
+      {
+        ["$group"] = {
+          ["_id"] = require 'resty-mongol.bson'.null,
+          ["total"] = {
+            ["$sum"] = "$length"
+          },
+          ["count"] = {
+            ["$sum"] = 1
+          }
+        }
+      }
     }
+    local res, err = fscol:aggregate(pipeline)
+    if not res then error(err) end
+    local _, res = next(res)
+    local ret = {
+      bsize = 1,
+      blocks = res.total,
+      files = res.count
+    }
+    return ret
   end
 
   local root = {
